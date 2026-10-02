@@ -557,13 +557,107 @@ html[data-sync-status="saving"] .sync-text[data-s="saving"],
 html[data-sync-status="error"] .sync-text[data-s="error"] { display: inline; }
 html[data-sync] .storage-warn { display: none; }
 
+/* ---------- วันหยุด พักนิสัย เหรียญ และการเทียบสัปดาห์ ---------- */
+
+.btn.sm { min-height: 40px; padding: 6px 14px; font-size: 14px; gap: 6px; }
+.btn-ghost { background: transparent; border: 1.5px solid var(--line-2); }
+
+.link-btn {
+  min-height: 40px; padding: 8px 0; border: 0; background: none; text-align: left;
+  color: var(--ink-2); font-size: 14px; line-height: 1.5; text-decoration: underline; text-underline-offset: 3px;
+}
+.day-tools { display: grid; justify-items: start; }
+
+.tag {
+  display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 999px; vertical-align: middle;
+  background: var(--surface-2); color: var(--ink-2); font-size: 12px; font-weight: 600; line-height: 1.7;
+}
+.chip .tag { background: var(--line); }
+
+.habit.is-rest .habit-name { color: var(--ink-2); }
+.habit.is-rest .chip-icon { opacity: 0.55; }
+.rest-tag { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+
+.seg.seg-2 { grid-template-columns: repeat(2, 1fr); }
+.cal-mode { display: grid; gap: 8px; margin-top: 12px; }
+.cal-d.is-rest { background: transparent; border: 2px dashed var(--ink-3); color: var(--ink-2); }
+
+.detail-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 12px; padding: 12px 14px; border-radius: 16px; background: var(--surface-2);
+}
+.detail-row > div { display: grid; min-width: 0; line-height: 1.5; }
+.detail-row strong { font-size: 15px; }
+.detail-row .muted { font-size: 13px; }
+.remind-input { display: flex; align-items: center; gap: 8px; }
+.remind-input .input { flex: 1; min-width: 0; }
+
+.medals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.medal-slot {
+  display: grid; justify-items: center; gap: 2px; padding: 10px 6px 8px; border-radius: 16px;
+  background: var(--surface-2); color: var(--ink-2); font-size: 12px; line-height: 1.5; text-align: center;
+}
+.medal-slot.earned { color: var(--ink); font-weight: 600; }
+.medal-slot:not(.earned) .medal { filter: grayscale(1); opacity: 0.35; }
+.medal { display: block; overflow: visible; }
+.medal .ribbon { fill: var(--medal-ribbon); }
+.medal .disc { fill: var(--medal); }
+.medal .ring { fill: none; stroke: var(--medal-ring); stroke-width: 2; }
+.medal text { fill: #2b1c05; font-family: var(--font); }
+.medal.m7 { --medal: #d99a5b; --medal-ring: #8c5424; --medal-ribbon: #2a78d6; }
+.medal.m30 { --medal: #d5dbe1; --medal-ring: #7b8794; --medal-ribbon: #4a3aa7; }
+.medal.m100 { --medal: #f4c542; --medal-ring: #a87800; --medal-ribbon: #e34948; }
+
+.celebrate {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px;
+  background: var(--scrim); cursor: pointer; animation: fade-in 0.2s ease-out;
+}
+.celebrate-card {
+  position: relative; display: grid; justify-items: center; gap: 6px; padding: 26px 32px 22px;
+  border-radius: 28px; background: var(--surface); box-shadow: var(--shadow-pop); text-align: center;
+  animation: celebrate-pop 0.55s cubic-bezier(0.2, 1.35, 0.4, 1);
+}
+.celebrate-card h2 { font-size: 24px; line-height: 1.4; }
+.celebrate-card p { line-height: 1.5; }
+.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.confetti i {
+  position: absolute; top: -16px; left: var(--l); width: 9px; height: 15px; border-radius: 2px;
+  background: var(--c); opacity: 0; animation: confetti-fall var(--t) ease-in var(--d) forwards;
+}
+
+.cmp-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; align-items: end; }
+.cmp-hero > div { display: grid; }
+.cmp-hero .delta { grid-column: 1 / -1; }
+.cmp-num { font-size: 36px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; }
+.cmp-num small { margin-left: 2px; font-size: 16px; font-weight: 600; letter-spacing: 0; color: var(--ink-2); }
+.cmp-num.dim { color: var(--ink-3); }
+.cmp-cap { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.cmp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cmp-list li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 10px 12px; border-radius: 16px; background: var(--surface-2);
+}
+.cmp-name { display: grid; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
+.cmp-sub { font-size: 13px; font-weight: 400; line-height: 1.5; color: var(--ink-2); }
+.delta { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
+.delta.up { color: var(--accent); }
+.delta.down { color: var(--danger); }
+.delta.same { color: var(--ink-2); }
+
 /* ---------- การเคลื่อนไหว ---------- */
 
 @keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes sheet-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes celebrate-pop { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: none; } }
+@keyframes confetti-fall {
+  0% { opacity: 1; transform: translate(0, 0) rotate(var(--r)); }
+  100% { opacity: 1; transform: translate(var(--s), 105vh) rotate(calc(var(--r) + 600deg)); }
+}
 @keyframes pop { 0% { transform: scale(0.82); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
 
 @media (prefers-reduced-motion: reduce) {
+  .confetti { display: none; }
   *, *::before, *::after {
     animation-duration: 0.001ms !important; animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important; scroll-behavior: auto !important;

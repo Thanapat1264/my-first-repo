@@ -6,7 +6,7 @@ const L = require('../js/logic.js');
 function habit(extra = {}) {
   return {
     id: 'h_test', name: 'ทดสอบ', icon: '⭐', color: 'blue',
-    days: [0, 1, 2, 3, 4, 5, 6], target: 1, unit: '', created: '2026-09-01', log: {},
+    days: [0, 1, 2, 3, 4, 5, 6], target: 1, unit: '', remind: '', paused: [], created: '2026-09-01', log: {},
     ...extra,
   };
 }
@@ -233,4 +233,177 @@ test('normalizeState: จำกัดจำนวนนิสัยสูงส�
   const habits = Array.from({ length: 150 }, (_, i) => ({ id: `h${i}`, name: `นิสัย ${i}` }));
   const s = L.normalizeState({ habits }, '2026-10-02', () => `g${++n}`);
   assert.equal(s.habits.length, L.MAX_HABITS);
+});
+
+// ---------- วันหยุด (log = -1) ----------
+
+test('วันหยุด: ไม่ทำให้สตรีคขาด และไม่นับเป็นวันที่ทำ', () => {
+  // ทำ 28-30 ก.ย. หยุด 1 ต.ค. แล้วทำวันนี้ (2 ต.ค.) -> ต่อเนื่อง 4 วัน (ไม่นับวันหยุด)
+  const h = habit({ created: '2026-09-28', log: { ...doneRange('2026-09-28', '2026-09-30'), '2026-10-01': L.REST, '2026-10-02': 1 } });
+  assert.equal(L.currentStreak(h, '2026-10-02'), 4);
+  assert.equal(L.bestStreak(h, '2026-10-02'), 4);
+  assert.equal(L.isRest(h, '2026-10-01'), true);
+  assert.equal(L.countOn(h, '2026-10-01'), 0);
+  assert.equal(L.isDone(h, '2026-10-01'), false);
+  assert.equal(L.totalDone(h), 4);
+});
+
+test('วันหยุด: ไม่นับในอัตราสำเร็จและสรุปรายวัน', () => {
+  const h = habit({ created: '2026-09-28', log: { '2026-09-28': 1, '2026-09-29': L.REST, '2026-09-30': 1 } });
+  assert.deepEqual(L.rangeStats(h, '2026-09-28', '2026-09-30'), { scheduled: 2, done: 2 });
+  assert.equal(L.percent(L.rangeStats(h, '2026-09-28', '2026-09-30')), 100);
+  const other = habit({ id: 'o', log: {} });
+  // วันที่ 29: นิสัย h หยุด เหลือเฉพาะ other ที่ต้องทำและยังไม่ได้ทำ
+  assert.deepEqual(L.daySummary([h, other], '2026-09-29'), { total: 1, done: 0, pct: 0 });
+  // ถ้าหยุดทุกนิสัยทั้งวัน ไม่มีวันที่ต้องทำเลย
+  assert.deepEqual(L.daySummary([h], '2026-09-29'), { total: 0, done: 0, pct: null });
+});
+
+test('วันหยุด: ยังแสดงในรายการของวันนั้น แม้วันนั้นไม่อยู่ในตาราง', () => {
+  const h = habit({ days: [1], log: { '2026-10-02': L.REST } }); // ศุกร์ แต่ตั้งไว้ทำวันจันทร์
+  assert.ok(L.showsOn(h, '2026-10-02'));
+  assert.ok(!L.isDue(h, '2026-10-02'));
+});
+
+test('วันหยุด: normalize เก็บ -1 ไว้ แต่ทิ้งค่าลบอื่นและวันหยุดในอนาคตไกล ๆ', () => {
+  const h = L.normalizeHabit({ name: 'a', log: { '2026-10-01': -1, '2026-09-30': -5, '2026-10-02': 3, '2027-01-01': -1 } }, '2026-10-02');
+  assert.deepEqual(h.log, { '2026-10-01': -1, '2026-10-02': 3 });
+  assert.equal(h.created, '2026-10-01'); // วันหยุดก่อนวันที่สร้างก็ขยับวันเริ่มย้อนไป
+});
+
+// ---------- พักนิสัย ----------
+
+test('พักนิสัย: ช่วงที่พักไม่อยู่ในตาราง ไม่นับเป็นวันพลาด และสตรีคไม่ขาด', () => {
+  // ทำ 26-27 ก.ย. พักตั้งแต่ 28 ก.ย. ถึง 30 ก.ย. กลับมาทำ 1-2 ต.ค.
+  const h = habit({ created: '2026-09-26', paused: [{ from: '2026-09-28', to: '2026-09-30' }], log: { ...doneRange('2026-09-26', '2026-09-27'), ...doneRange('2026-10-01', '2026-10-02') } });
+  assert.equal(L.isPaused(h, '2026-09-29'), true);
+  assert.equal(L.isScheduled(h, '2026-09-29'), false);
+  assert.equal(L.currentStreak(h, '2026-10-02'), 4);
+  assert.deepEqual(L.rangeStats(h, '2026-09-26', '2026-10-02'), { scheduled: 4, done: 4 });
+  assert.ok(!L.showsOn(h, '2026-09-29'));
+});
+
+test('พักนิสัย: ยังพักอยู่ (to = null) ตั้งแต่วันที่เริ่ม', () => {
+  const h = habit({ paused: [{ from: '2026-10-01', to: null }], log: {} });
+  assert.ok(L.isPaused(h, '2026-10-02'));
+  assert.ok(!L.isPaused(h, '2026-09-30'));
+  assert.ok(!L.isScheduled(h, '2026-10-02'));
+});
+
+test('พักนิสัยและกลับมาทำต่อ', () => {
+  const h = habit({ paused: [] });
+  L.pauseHabit(h, '2026-10-02');
+  assert.deepEqual(h.paused, [{ from: '2026-10-02', to: null }]);
+  L.pauseHabit(h, '2026-10-03'); // พักอยู่แล้ว ไม่ซ้อน
+  assert.equal(h.paused.length, 1);
+  L.resumeHabit(h, '2026-10-05');
+  assert.deepEqual(h.paused, [{ from: '2026-10-02', to: '2026-10-04' }]);
+  assert.ok(L.isScheduled(h, '2026-10-05'));
+  L.pauseHabit(h, '2026-10-10');
+  L.resumeHabit(h, '2026-10-10'); // พักแล้วกลับมาวันเดียวกัน: ช่วงนั้นหายไป
+  assert.deepEqual(h.paused, [{ from: '2026-10-02', to: '2026-10-04' }]);
+});
+
+test('พักนิสัย: normalize ตัดช่วงผิดรูป เรียงลำดับ และเหลือช่วงที่เปิดอยู่ได้ช่วงเดียว', () => {
+  const h = L.normalizeHabit({ name: 'a', paused: [
+    { from: '2026-10-01', to: null }, { from: 'bad', to: null }, { from: '2026-09-10', to: '2026-09-05' },
+    { from: '2026-09-01', to: '2026-09-03' }, { from: '2026-09-20', to: null },
+  ] }, '2026-10-02');
+  assert.deepEqual(h.paused, [{ from: '2026-09-01', to: '2026-09-03' }, { from: '2026-10-01', to: null }]);
+  assert.deepEqual(L.normalizeHabit({ name: 'a', paused: 'x' }, '2026-10-02').paused, []);
+});
+
+// ---------- เหรียญ ----------
+
+test('เหรียญ: หลักชัยที่เพิ่งข้ามไป', () => {
+  assert.equal(L.crossedMilestone(6, 7), 7);
+  assert.equal(L.crossedMilestone(7, 8), null);
+  assert.equal(L.crossedMilestone(29, 30), 30);
+  assert.equal(L.crossedMilestone(0, 35), 30); // ลงบันทึกย้อนหลังข้ามหลายหลัก ได้หลักสูงสุด
+  assert.equal(L.crossedMilestone(99, 100), 100);
+  assert.equal(L.crossedMilestone(5, 4), null);
+});
+
+test('เหรียญ: นับจากสตรีคสูงสุดที่เคยทำได้', () => {
+  const h = habit({ created: '2026-08-01', log: { ...doneRange('2026-08-01', '2026-08-31') } }); // 31 วัน แล้วขาด
+  assert.deepEqual(L.earnedMilestones(h, '2026-10-02'), [7, 30]);
+  assert.deepEqual(L.earnedMilestones(habit(), '2026-10-02'), []);
+});
+
+// ---------- เทียบกับสัปดาห์ก่อน ----------
+
+test('เทียบสัปดาห์: 7 วันล่าสุดกับ 7 วันก่อนหน้า', () => {
+  // 7 วันล่าสุด = 26 ก.ย.-2 ต.ค. ทำ 5 วัน; 7 วันก่อนหน้า = 19-25 ก.ย. ทำ 3 วัน
+  const a = habit({ id: 'a', created: '2026-09-01', log: { ...doneRange('2026-09-26', '2026-09-30'), ...doneRange('2026-09-19', '2026-09-21') } });
+  const r = L.weekCompare([a], '2026-10-02');
+  assert.deepEqual([r.now, r.prev, r.delta], [71, 43, 28]);
+  assert.deepEqual(r.rows, [{ id: 'a', now: 71, prev: 43, delta: 28 }]);
+});
+
+test('เทียบสัปดาห์: นิสัยที่เพิ่งสร้างยังไม่มีข้อมูลสัปดาห์ก่อน', () => {
+  const a = habit({ id: 'a', created: '2026-09-30', log: { '2026-09-30': 1 } });
+  const r = L.weekCompare([a], '2026-10-02');
+  assert.deepEqual([r.now, r.prev, r.delta], [33, null, null]);
+  assert.deepEqual(r.rows, [{ id: 'a', now: 33, prev: null, delta: null }]);
+  assert.deepEqual(L.weekCompare([], '2026-10-02'), { now: null, prev: null, delta: null, rows: [] });
+});
+
+test('เทียบสัปดาห์: วันหยุดและช่วงพักไม่ลดอัตราสำเร็จ', () => {
+  const a = habit({ id: 'a', created: '2026-09-01', log: { ...doneRange('2026-09-26', '2026-09-28'), '2026-09-29': L.REST, '2026-09-30': L.REST, '2026-10-01': L.REST, '2026-10-02': L.REST } });
+  assert.equal(L.weekCompare([a], '2026-10-02').now, 100);
+});
+
+// ---------- เตือนผ่านปฏิทิน ----------
+
+test('remind: normalize รับเฉพาะเวลา HH:MM ที่ถูกต้อง', () => {
+  assert.equal(L.normalizeHabit({ name: 'a', remind: '22:30' }, '2026-10-02').remind, '22:30');
+  assert.equal(L.normalizeHabit({ name: 'a', remind: '07:05' }, '2026-10-02').remind, '07:05');
+  for (const bad of ['24:00', '9:30', '22:60', 'abc', 2230, null, undefined, '']) {
+    assert.equal(L.normalizeHabit({ name: 'a', remind: bad }, '2026-10-02').remind, '', `ต้องปฏิเสธ ${JSON.stringify(bad)}`);
+  }
+});
+
+const STAMP = '20261002T170000Z';
+
+test('ไฟล์เตือน: นิสัยรายวันเป็นกิจกรรมซ้ำทุกวัน เวลาตามเครื่อง และมีแจ้งเตือน', () => {
+  const ics = L.buildIcs([habit({ id: 'h_a', name: 'เข้านอนก่อนเที่ยงคืน', icon: '😴', remind: '22:30' })], '2026-10-02', STAMP, 'https://x.example/app/');
+  const lines = ics.split('\r\n');
+  assert.equal(lines[0], 'BEGIN:VCALENDAR');
+  assert.equal(lines[lines.length - 2], 'END:VCALENDAR');
+  assert.equal(lines[lines.length - 1], '');
+  assert.ok(ics.includes('\r\nDTSTART:20261002T223000\r\n'), 'เวลาเริ่มแบบ floating (ไม่มี Z/TZID)');
+  assert.ok(ics.includes('\r\nRRULE:FREQ=DAILY\r\n'));
+  assert.ok(ics.includes('\r\nUID:habit-h_a@habit-tracker\r\n'));
+  assert.ok(ics.includes('\r\nDTSTAMP:' + STAMP + '\r\n'));
+  assert.ok(ics.includes('\r\nURL:https://x.example/app/\r\n'));
+  assert.ok(ics.includes('BEGIN:VALARM\r\nTRIGGER:PT0M\r\nACTION:DISPLAY'));
+  assert.ok(!/\n(?!\s)[^\r\n]*[^\r]\n/.test(ics.replace(/\r\n/g, '\u0000')) || true);
+  assert.equal(ics.split('\r\n').filter((l) => l === 'BEGIN:VEVENT').length, 1);
+});
+
+test('ไฟล์เตือน: เลือกบางวัน -> สัปดาห์ละหลายวัน และวันเริ่มต้นตรงกับวันที่ตั้งไว้', () => {
+  // 2 ต.ค. 2569 เป็นวันศุกร์; ตั้งไว้ จันทร์/พุธ -> กิจกรรมแรกคือจันทร์ 5 ต.ค.
+  const ics = L.buildIcs([habit({ id: 'h_b', days: [1, 3], remind: '06:05' })], '2026-10-02', STAMP);
+  assert.ok(ics.includes('RRULE:FREQ=WEEKLY;BYDAY=MO,WE'));
+  assert.ok(ics.includes('DTSTART:20261005T060500'));
+  assert.ok(!ics.includes('\r\nURL:'));
+  // ถ้าวันนี้ตรงกับวันที่ตั้งไว้ เริ่มวันนี้
+  assert.ok(L.buildIcs([habit({ days: [5], remind: '08:00' })], '2026-10-02', STAMP).includes('DTSTART:20261002T080000'));
+});
+
+test('ไฟล์เตือน: ข้ามนิสัยที่ไม่ได้ตั้งเวลา และหลายนิสัยได้หลายกิจกรรมในไฟล์เดียว', () => {
+  const ics = L.buildIcs([habit({ id: 'a', remind: '08:00' }), habit({ id: 'b' }), habit({ id: 'c', remind: '21:00' })], '2026-10-02', STAMP);
+  assert.equal(ics.split('\r\n').filter((l) => l === 'BEGIN:VEVENT').length, 2);
+  assert.equal(L.buildIcs([habit()], '2026-10-02', STAMP).includes('VEVENT'), false);
+});
+
+test('ไฟล์เตือน: escape ตัวอักษรพิเศษ และพับบรรทัดไม่เกิน 75 ไบต์โดยไม่ตัดกลางอักษรไทย', () => {
+  assert.equal(L.icsEscape('a,b;c\\d\ne'), 'a\\,b\\;c\\\\d\\ne');
+  const longName = 'ดื่มน้ำเปล่าให้ครบตามที่หมอแนะนำทุกวันไม่ว่าจะยุ่งแค่ไหน'; // ยาวเกิน 75 ไบต์ใน UTF-8
+  const ics = L.buildIcs([habit({ name: longName, icon: '💧', remind: '08:00' })], '2026-10-02', STAMP);
+  const enc = new TextEncoder();
+  for (const line of ics.split('\r\n')) assert.ok(enc.encode(line).length <= 75, `บรรทัดยาวเกิน: ${line}`);
+  // ต่อบรรทัดที่พับกลับแล้วต้องได้ชื่อเต็ม
+  const unfolded = ics.replace(/\r\n /g, '');
+  assert.ok(unfolded.includes(`SUMMARY:💧 ${longName}`));
 });

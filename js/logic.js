@@ -14,6 +14,9 @@
   const MAX_DAYS = 3660; // เพดานของลูปที่วนตามวัน (~10 ปี) กันค้างเมื่อข้อมูลผิดปกติ
   const MIN_KEY = '2000-01-01';
   const MAX_HABITS = 100;
+  const MAX_PAUSES = 50;
+  const REST = -1;                 // ค่าใน log ที่หมายถึง "วันหยุด" ของวันนั้น (ไม่ใช่จำนวนครั้ง)
+  const MILESTONES = [7, 30, 100]; // สตรีคที่ได้เหรียญ (วัน)
 
   const HUES = ['blue', 'orange', 'aqua', 'yellow', 'magenta', 'green', 'violet', 'red'];
   const THEMES = ['system', 'light', 'dark'];
@@ -130,20 +133,40 @@
   }
 
   // ---------- นิสัยหนึ่งรายการ ----------
-  // habit = { id, name, icon, color, days:[0-6], target, unit, created, log:{ [key]: จำนวนครั้ง } }
+  // habit = { id, name, icon, color, days:[0-6], target, unit, created, remind:'HH:MM'|'',
+  //           paused:[{from, to|null}], log:{ [key]: จำนวนครั้ง หรือ -1 = วันหยุด } }
 
-  const isScheduled = (h, key) => key >= h.created && h.days.indexOf(weekday(key)) !== -1;
-  const countOn = (h, key) => h.log[key] || 0;
+  /** วันนี้อยู่ในช่วงที่พักนิสัยอยู่หรือไม่ (to = null คือพักต่อเนื่องจนกว่าจะกลับมาทำ) */
+  const isPaused = (h, key) => !!h.paused && h.paused.some((p) => key >= p.from && (p.to === null || key <= p.to));
+  const isScheduled = (h, key) => key >= h.created && h.days.indexOf(weekday(key)) !== -1 && !isPaused(h, key);
+  const isRest = (h, key) => h.log[key] === REST;
+  const countOn = (h, key) => (h.log[key] > 0 ? h.log[key] : 0);
   const isDone = (h, key) => countOn(h, key) >= h.target;
+  /** วันนั้นต้องทำจริง: อยู่ในตาราง ไม่ได้พักนิสัย และไม่ได้ตั้งเป็นวันหยุด (ใช้นับสตรีคและอัตราสำเร็จ) */
+  const isDue = (h, key) => isScheduled(h, key) && !isRest(h, key);
   /** แสดงในรายการของวันนั้นหรือไม่: อยู่ในตาราง หรือมีบันทึกอยู่แล้ว (ไม่ให้บันทึกหายไปจากหน้าจอ) */
-  const showsOn = (h, key) => isScheduled(h, key) || countOn(h, key) > 0;
+  const showsOn = (h, key) => isScheduled(h, key) || countOn(h, key) > 0 || isRest(h, key);
+
+  /** เริ่มพักนิสัยตั้งแต่วัน key (ถ้ายังไม่ได้พักอยู่) */
+  function pauseHabit(h, key) {
+    if (!h.paused) h.paused = [];
+    if (!h.paused.some((p) => p.to === null)) h.paused.push({ from: key, to: null });
+  }
+
+  /** กลับมาทำต่อตั้งแต่วัน key: ช่วงที่พักจบที่วันก่อนหน้า (ถ้าพักแล้วกลับมาวันเดียวกัน ช่วงนั้นถูกลบทิ้ง) */
+  function resumeHabit(h, key) {
+    const prev = addDays(key, -1);
+    h.paused = (h.paused || [])
+      .map((p) => (p.to === null || p.to >= key ? { from: p.from, to: p.from <= prev ? prev : null } : p))
+      .filter((p) => p.to !== null || p.from < key);
+  }
 
   /** สรุปของวันหนึ่ง นับเฉพาะนิสัยที่อยู่ในตารางของวันนั้น */
   function daySummary(habits, key) {
     let total = 0;
     let done = 0;
     for (const h of habits) {
-      if (!isScheduled(h, key)) continue;
+      if (!isDue(h, key)) continue;
       total++;
       if (isDone(h, key)) done++;
     }
@@ -151,28 +174,28 @@
   }
 
   /**
-   * จำนวนวันที่ทำต่อเนื่องจนถึงวันนี้ ข้ามวันที่ไม่อยู่ในตาราง
+   * จำนวนวันที่ทำต่อเนื่องจนถึงวันนี้ ข้ามวันที่ไม่อยู่ในตาราง รวมถึงวันหยุดและช่วงที่พักนิสัย (ไม่ทำให้สตรีคขาด)
    * วันนี้ที่ยังไม่ได้ทำไม่ทำให้สตรีคขาด (ยังมีเวลาทำ) แต่ถ้าทำแล้วก็นับเพิ่ม
    */
   function currentStreak(h, todayKey) {
     let streak = 0;
     let key = todayKey;
     for (let i = 0; i < MAX_DAYS && key >= h.created; i++, key = addDays(key, -1)) {
-      if (!isScheduled(h, key)) continue;
+      if (!isDue(h, key)) continue;
       if (isDone(h, key)) streak++;
       else if (key !== todayKey) break;
     }
     return streak;
   }
 
-  /** สตรีคที่ยาวที่สุดตลอดช่วงที่ติดตามมา */
+  /** สตรีคที่ยาวที่สุดตลอดช่วงที่ติดตามมา (ข้ามวันหยุดและช่วงที่พักเหมือนสตรีคปัจจุบัน) */
   function bestStreak(h, todayKey) {
     const limit = addDays(todayKey, -(MAX_DAYS - 1));
     let key = h.created > limit ? h.created : limit;
     let best = 0;
     let run = 0;
     for (; key <= todayKey; key = addDays(key, 1)) {
-      if (!isScheduled(h, key)) continue;
+      if (!isDue(h, key)) continue;
       if (isDone(h, key)) {
         run++;
         if (run > best) best = run;
@@ -196,7 +219,7 @@
     let done = 0;
     let key = fromKey > h.created ? fromKey : h.created;
     for (let i = 0; i < MAX_DAYS && key <= toKey; i++, key = addDays(key, 1)) {
-      if (!isScheduled(h, key)) continue;
+      if (!isDue(h, key)) continue;
       scheduled++;
       if (isDone(h, key)) done++;
     }
@@ -216,6 +239,40 @@
   /** เปอร์เซ็นต์ปัดเป็นจำนวนเต็ม หรือ null ถ้าไม่มีวันในตารางเลย */
   const percent = (s) => (s.scheduled ? Math.round((s.done / s.scheduled) * 100) : null);
 
+  /** หลักชัยสตรีคที่เพิ่งข้ามไปเมื่อสตรีคเปลี่ยนจาก before เป็น after (ได้เหรียญสูงสุดที่ข้ามในครั้งเดียว) หรือ null */
+  function crossedMilestone(before, after) {
+    let hit = null;
+    for (const t of MILESTONES) if (before < t && after >= t) hit = t;
+    return hit;
+  }
+
+  /** เหรียญที่เคยได้แล้ว นับจากสตรีคสูงสุด */
+  function earnedMilestones(h, todayKey) {
+    const best = bestStreak(h, todayKey);
+    return MILESTONES.filter((t) => best >= t);
+  }
+
+  /**
+   * เทียบ 7 วันล่าสุด (รวมวันนี้) กับ 7 วันก่อนหน้า ทั้งภาพรวมและรายนิสัย
+   * ค่าเป็นเปอร์เซ็นต์ปัดเศษ หรือ null ถ้าช่วงนั้นไม่มีวันที่ต้องทำเลย; delta = เปลี่ยนไปกี่จุดเปอร์เซ็นต์
+   */
+  function weekCompare(habits, todayKey) {
+    const nowFrom = addDays(todayKey, -6);
+    const prevFrom = addDays(todayKey, -13);
+    const prevTo = addDays(todayKey, -7);
+    const diff = (a, b) => (a !== null && b !== null ? a - b : null);
+    const now = percent(overallStats(habits, nowFrom, todayKey));
+    const prev = percent(overallStats(habits, prevFrom, prevTo));
+    const rows = [];
+    for (const h of habits) {
+      const a = percent(rangeStats(h, nowFrom, todayKey));
+      const b = percent(rangeStats(h, prevFrom, prevTo));
+      if (a === null && b === null) continue;
+      rows.push({ id: h.id, now: a, prev: b, delta: diff(a, b) });
+    }
+    return { now, prev, delta: diff(now, prev), rows };
+  }
+
   function describeDays(days) {
     const key = days.join(',');
     if (days.length === 7) return 'ทุกวัน';
@@ -228,6 +285,63 @@
 
   function describeGoal(h) {
     return h.target > 1 ? `${h.target} ${unitOf(h)}/วัน` : 'วันละครั้ง';
+  }
+
+  // ---------- ไฟล์เตือนสำหรับปฏิทินมือถือ (.ics) ----------
+
+  const ICS_DAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+  const icsEscape = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+
+  /** พับบรรทัดไม่ให้เกิน 75 ไบต์ UTF-8 ตามมาตรฐาน iCalendar โดยไม่ตัดกลางตัวอักษร (บรรทัดต่อมาขึ้นต้นด้วยช่องว่าง 1 ตัว) */
+  function icsFold(line) {
+    const enc = new TextEncoder();
+    if (enc.encode(line).length <= 75) return line;
+    const parts = [];
+    let cur = '';
+    let bytes = 0;
+    let limit = 75;
+    for (const ch of line) {
+      const n = enc.encode(ch).length;
+      if (bytes + n > limit) {
+        parts.push(cur);
+        cur = '';
+        bytes = 0;
+        limit = 74;
+      }
+      cur += ch;
+      bytes += n;
+    }
+    parts.push(cur);
+    return parts.join('\r\n ');
+  }
+
+  /**
+   * สร้างไฟล์ปฏิทินที่เตือนซ้ำตามวันของแต่ละนิสัยที่ตั้งเวลา remind ไว้ (เวลาแบบ "ตามเครื่อง" ไม่ผูกเขตเวลา)
+   * stampUtc เช่น 20261002T170000Z; appUrl (ถ้ามี) ใส่เป็นลิงก์ในกิจกรรมให้แตะเปิดแอปได้
+   */
+  function buildIcs(habits, todayKey, stampUtc, appUrl) {
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//habit-tracker//TH', 'CALSCALE:GREGORIAN'];
+    for (const h of habits) {
+      if (!h.remind) continue;
+      let first = todayKey;
+      for (let i = 0; i < 7 && h.days.indexOf(weekday(first)) === -1; i++) first = addDays(first, 1);
+      const start = `${first.replace(/-/g, '')}T${h.remind.replace(':', '')}00`;
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:habit-${h.id}@habit-tracker`,
+        `DTSTAMP:${stampUtc}`,
+        `DTSTART:${start}`,
+        'DURATION:PT15M',
+        h.days.length === 7 ? 'RRULE:FREQ=DAILY' : `RRULE:FREQ=WEEKLY;BYDAY=${h.days.map((d) => ICS_DAYS[d]).join(',')}`,
+        `SUMMARY:${icsEscape(`${h.icon} ${h.name}`)}`,
+        `DESCRIPTION:${icsEscape('ถึงเวลาทำนิสัยนี้แล้ว เปิดแอปนิสัยประจำวันเพื่อติ๊กเมื่อทำเสร็จ')}`,
+      );
+      if (appUrl) lines.push(`URL:${appUrl}`);
+      lines.push('BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(h.name)}`, 'END:VALARM', 'END:VEVENT');
+    }
+    lines.push('END:VCALENDAR');
+    return lines.map(icsFold).join('\r\n') + '\r\n';
   }
 
   // ---------- ตรวจและทำความสะอาดข้อมูล (ใช้ตอนโหลดและนำเข้า) ----------
@@ -251,6 +365,23 @@
 
   const validId = (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(id);
 
+  /** ช่วงที่พักนิสัย: เรียงตามวันเริ่ม ตัดช่วงที่ผิดรูป และเหลือช่วงที่ยังพักอยู่ (to = null) ได้ช่วงเดียว */
+  function normalizePaused(v) {
+    const list = [];
+    if (Array.isArray(v)) {
+      for (const p of v) {
+        if (!p || !isKey(p.from) || p.from < MIN_KEY) continue;
+        const open = p.to === null || p.to === undefined;
+        if (!open && (!isKey(p.to) || p.to < p.from)) continue;
+        list.push({ from: p.from, to: open ? null : p.to });
+      }
+    }
+    list.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+    let lastOpen = -1;
+    list.forEach((p, i) => { if (p.to === null) lastOpen = i; });
+    return list.filter((p, i) => p.to !== null || i === lastOpen).slice(-MAX_PAUSES);
+  }
+
   /** คืน habit ที่สะอาดแล้ว หรือ null ถ้าไม่มีชื่อ (id ปล่อยให้ normalizeState จัดการ) */
   function normalizeHabit(raw, todayKey) {
     if (!raw || typeof raw !== 'object') return null;
@@ -262,6 +393,7 @@
     if (raw.log && typeof raw.log === 'object') {
       for (const key of Object.keys(raw.log)) {
         if (!isKey(key) || key < MIN_KEY || key > latest) continue;
+        if (raw.log[key] === REST) { log[key] = REST; continue; }
         const n = clampInt(raw.log[key], 0, 99, 0);
         if (n > 0) log[key] = n;
       }
@@ -280,7 +412,9 @@
       days: normalizeDays(raw.days),
       target: clampInt(raw.target, 1, 99, 1),
       unit: cleanText(raw.unit, 12),
+      remind: typeof raw.remind === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(raw.remind) ? raw.remind : '',
       created,
+      paused: normalizePaused(raw.paused),
       log,
     };
   }
@@ -303,13 +437,16 @@
   }
 
   return {
-    HUES, THEMES, MAX_DAYS, MAX_HABITS,
+    HUES, THEMES, MAX_DAYS, MAX_HABITS, REST, MILESTONES,
     TH_MONTHS, TH_MONTHS_SHORT, TH_DAYS, TH_DAYS_SHORT,
     toKey, isKey, parseKey, addDays, diffDays, weekday, startOfWeek, daysInMonth,
     lastDays, monthGrid, heatmapGrid,
     formatFull, formatShort, formatDayMonth, formatMonthYear, relativeLabel,
-    isScheduled, countOn, isDone, showsOn, daySummary,
+    isPaused, isScheduled, isRest, isDue, countOn, isDone, showsOn, daySummary,
+    pauseHabit, resumeHabit,
     currentStreak, bestStreak, totalDone, rangeStats, overallStats, percent,
+    crossedMilestone, earnedMilestones, weekCompare,
+    buildIcs, icsEscape, icsFold,
     describeDays, describeGoal, unitOf,
     normalizeHabit, normalizeState,
   };
