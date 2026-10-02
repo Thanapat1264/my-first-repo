@@ -15,6 +15,7 @@
   const MIN_KEY = '2000-01-01';
   const MAX_HABITS = 100;
   const MAX_PAUSES = 50;
+  const ICON_MAX = 16; // จำนวน code point สูงสุดของไอคอน (อีโมจิที่ต่อด้วย ZWJ เช่น ครอบครัว ยาวได้ถึง ~11)
   const REST = -1;                 // ค่าใน log ที่หมายถึง "วันหยุด" ของวันนั้น (ไม่ใช่จำนวนครั้ง)
   const MILESTONES = [7, 30, 100]; // สตรีคที่ได้เหรียญ (วัน)
 
@@ -357,6 +358,15 @@
     return Array.from(v.trim().replace(/\s+/g, ' ')).slice(0, max).join('');
   }
 
+  // อีโมจิหนึ่งตัว: ธงประเทศ, ปุ่มตัวเลข (1️⃣), หรือรูปอีโมจิพร้อมตัวแปรสี/ตัวเลือกการแสดงผล และต่อกันด้วย ZWJ ได้ (👨‍👩‍👧)
+  const EMOJI_RE = /\p{Regional_Indicator}{2}|[0-9#*]️?⃣|\p{Extended_Pictographic}[️\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]*(?:‍\p{Extended_Pictographic}[️\u{1F3FB}-\u{1F3FF}]*)*/u;
+
+  /** อีโมจิตัวแรกในข้อความ (ที่ผู้ใช้เลือกจากคีย์บอร์ดมือถือ) หรือ '' ถ้าไม่มีอีโมจิเลย */
+  function firstEmoji(text) {
+    const m = typeof text === 'string' ? EMOJI_RE.exec(text) : null;
+    return m ? m[0] : '';
+  }
+
   function normalizeDays(v) {
     const set = new Set();
     if (Array.isArray(v)) for (const d of v) if (Number.isInteger(d) && d >= 0 && d <= 6) set.add(d);
@@ -407,7 +417,7 @@
     return {
       id: raw.id,
       name,
-      icon: Array.from(typeof raw.icon === 'string' ? raw.icon.trim() : '').slice(0, 8).join('') || '⭐',
+      icon: Array.from(typeof raw.icon === 'string' ? raw.icon.trim() : '').slice(0, ICON_MAX).join('') || '⭐',
       color: HUES.indexOf(raw.color) !== -1 ? raw.color : 'blue',
       days: normalizeDays(raw.days),
       target: clampInt(raw.target, 1, 99, 1),
@@ -445,7 +455,7 @@
     isPaused, isScheduled, isRest, isDue, countOn, isDone, showsOn, daySummary,
     pauseHabit, resumeHabit,
     currentStreak, bestStreak, totalDone, rangeStats, overallStats, percent,
-    crossedMilestone, earnedMilestones, weekCompare,
+    crossedMilestone, earnedMilestones, weekCompare, firstEmoji,
     buildIcs, icsEscape, icsFold,
     describeDays, describeGoal, unitOf,
     normalizeHabit, normalizeState,

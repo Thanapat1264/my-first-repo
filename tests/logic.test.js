@@ -407,3 +407,29 @@ test('ไฟล์เตือน: escape ตัวอักษรพิเศ�
   const unfolded = ics.replace(/\r\n /g, '');
   assert.ok(unfolded.includes(`SUMMARY:💧 ${longName}`));
 });
+
+test('firstEmoji: หยิบอีโมจิตัวแรกที่ผู้ใช้เลือกจากคีย์บอร์ดมือถือ ครบทั้งตัวที่ประกอบหลายส่วน', () => {
+  const cases = [
+    ['🎸', '🎸'],
+    ['ab🎯cd', '🎯'],          // มีตัวอักษรปนมา ข้ามไปหาอีโมจิ
+    ['❤️', '❤️'],             // ต้องมีตัวเลือกแสดงผลแบบอีโมจิ (VS16) ติดมาด้วย
+    ['👍🏽', '👍🏽'],            // โทนสีผิว
+    ['👨‍👩‍👧‍👦', '👨‍👩‍👧‍👦'],  // ครอบครัว: หลายอีโมจิต่อด้วย ZWJ
+    ['🏋️‍♀️', '🏋️‍♀️'],
+    ['🇹🇭', '🇹🇭'],            // ธง = ตัวอักษรภูมิภาค 2 ตัว
+    ['1️⃣', '1️⃣'],             // ปุ่มตัวเลข
+    ['🏴󠁧󠁢󠁥󠁮󠁧󠁿', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'],  // ธงที่ประกอบด้วยแท็ก
+    ['🎸🎹', '🎸'],             // หลายตัว เอาตัวแรก
+  ];
+  for (const [input, want] of cases) assert.equal(L.firstEmoji(input), want, `input ${JSON.stringify(input)}`);
+});
+
+test('firstEmoji: ข้อความที่ไม่มีอีโมจิ หรือไม่ใช่ข้อความ คืนค่าว่าง', () => {
+  for (const input of ['', 'abc', 'ไทย', '123', '#', '  ', null, undefined, 42]) assert.equal(L.firstEmoji(input), '', `input ${JSON.stringify(input)}`);
+});
+
+test('normalizeHabit: ไอคอนอีโมจิที่ประกอบหลายส่วนไม่ถูกตัดกลางคัน แต่ข้อความยาวผิดปกติถูกจำกัด', () => {
+  const family = '👨‍👩‍👧‍👦';
+  assert.equal(L.normalizeHabit({ id: 'x', name: 'a', icon: family }, '2026-10-02').icon, family);
+  assert.equal(Array.from(L.normalizeHabit({ id: 'x', name: 'a', icon: 'x'.repeat(100) }, '2026-10-02').icon).length, 16);
+});

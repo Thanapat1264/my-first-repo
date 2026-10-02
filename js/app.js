@@ -694,10 +694,13 @@
   function openForm(id, preset) {
     const h = id ? findHabit(id) : null;
     const base = h || preset || {};
+    const icon = base.icon || '🎯';
     ui.form = {
       id: h ? h.id : null,
       name: base.name || '',
-      icon: base.icon || '🎯',
+      icon,
+      // อีโมจิที่เลือกเองจากคีย์บอร์ด (รวมไอคอนเดิมของนิสัยที่แก้ไขอยู่) แสดงก่อนชุดสำเร็จรูป ให้เลือกกลับไปมาได้
+      extra: EMOJIS.indexOf(icon) === -1 ? [icon] : [],
       color: base.color || nextFreeHue(),
       days: new Set(h ? h.days : [0, 1, 2, 3, 4, 5, 6]),
       target: base.target || 1,
@@ -712,10 +715,26 @@
     }
   }
 
+  /** ปุ่มไอคอนในฟอร์ม: ตัวที่เลือกเอง (และไอคอนเดิมของนิสัยที่แก้ไขอยู่) ขึ้นก่อนชุดสำเร็จรูป */
+  function emojiButtons(f) {
+    const custom = f.extra.slice();
+    if (EMOJIS.indexOf(f.icon) === -1 && custom.indexOf(f.icon) === -1) custom.unshift(f.icon);
+    return html`${custom.concat(EMOJIS).map((e) => html`<button class="emoji" type="button" data-action="pick-icon" data-icon="${e}" aria-pressed="${f.icon === e ? 'true' : 'false'}" aria-label="ไอคอน ${e}">${e}</button>`)}`;
+  }
+
+  function useCustomEmoji(emoji) {
+    const f = ui.form;
+    f.icon = emoji;
+    if (EMOJIS.indexOf(emoji) === -1 && f.extra.indexOf(emoji) === -1) {
+      f.extra.push(emoji);
+      if (f.extra.length > 12) f.extra.shift();
+    }
+    mount($('#emoji-grid'), emojiButtons(f));
+  }
+
   function renderForm() {
     const f = ui.form;
     const editing = !!f.id;
-    const icons = EMOJIS.indexOf(f.icon) === -1 ? [f.icon].concat(EMOJIS) : EMOJIS;
     const dayChip = (d) => html`<button type="button" data-action="toggle-dow" data-d="${d}" aria-pressed="${f.days.has(d) ? 'true' : 'false'}" aria-label="วัน${L.TH_DAYS[d]}">${L.TH_DAYS_SHORT[d]}</button>`;
 
     mount($('#dlg-form .sheet'), html`
@@ -731,7 +750,9 @@
         ${editing ? '' : html`<div class="field"><span class="label">หรือเลือกจากไอเดีย</span>
           <div class="chips">${IDEAS.map((idea, i) => html`<button class="chip sm" type="button" data-action="idea" data-i="${i}">${idea.icon} ${idea.name}</button>`)}</div></div>`}
         <div class="field"><span class="label" id="lbl-icon">ไอคอน</span>
-          <div class="emoji-grid" role="group" aria-labelledby="lbl-icon">${icons.map((e) => html`<button class="emoji" type="button" data-action="pick-icon" data-icon="${e}" aria-pressed="${f.icon === e ? 'true' : 'false'}" aria-label="ไอคอน ${e}">${e}</button>`)}</div></div>
+          <div class="emoji-grid" id="emoji-grid" role="group" aria-labelledby="lbl-icon">${emojiButtons(f)}</div>
+          <input class="input" id="f-emoji" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="เพิ่มอีโมจิอื่น" placeholder="แตะที่นี่ แล้วเลือกอีโมจิจากคีย์บอร์ด">
+          <p class="muted">ได้ทุกตัวที่คีย์บอร์ดมี iPhone: กดปุ่มรูปโลกเพื่อสลับเป็นอีโมจิ</p></div>
         <div class="field"><span class="label" id="lbl-color">สี</span>
           <div class="swatches" role="group" aria-labelledby="lbl-color">${L.HUES.map((c) => html`<button class="swatch hue-${c}" type="button" data-action="pick-color" data-color="${c}" aria-pressed="${f.color === c ? 'true' : 'false'}" aria-label="สี${HUE_NAMES[c]}">${ico('check', 18)}</button>`)}</div></div>
         <div class="field"><span class="label" id="lbl-days">ทำวันไหนบ้าง</span>
@@ -1187,6 +1208,12 @@
       ui.form.unit = e.target.value;
     } else if (e.target.id === 'f-remind') {
       ui.form.remind = e.target.value;
+    } else if (e.target.id === 'f-emoji') {
+      if (e.isComposing || !e.target.value) return;
+      const emoji = L.firstEmoji(e.target.value);
+      e.target.value = '';
+      if (emoji) useCustomEmoji(emoji);
+      else toast('ช่องนี้ใส่ได้เฉพาะอีโมจิ ลองสลับเป็นคีย์บอร์ดอีโมจิ');
     }
   }
 

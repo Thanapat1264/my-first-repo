@@ -400,6 +400,7 @@ html.no-modal dialog[open] { background: var(--scrim); }
   font-size: 22px; line-height: 1;
 }
 .emoji[aria-pressed="true"] { border-color: var(--ink); background: var(--surface); }
+.emoji-grid + .input { margin-top: 2px; }
 
 .swatches { display: grid; grid-template-columns: repeat(8, 1fr); justify-items: center; gap: 10px 0; }
 @media (max-width: 339px) { .swatches { grid-template-columns: repeat(4, 1fr); } }
