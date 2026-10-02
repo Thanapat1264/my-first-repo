@@ -355,6 +355,8 @@ h1, h2, h3 { text-wrap: balance; }
 .check[aria-disabled="true"] { cursor: default; }
 .check.pop { animation: pop 0.3s ease-out; }
 
+.resting { display: grid; gap: 8px; padding-top: 4px; }
+.resting-title { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
 .empty { display: grid; justify-items: center; gap: 14px; padding: 24px 8px 8px; text-align: center; }
 .empty h2 { font-size: 22px; line-height: 1.4; }
 .empty p { color: var(--ink-2); max-width: 32ch; }

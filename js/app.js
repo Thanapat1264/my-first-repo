@@ -258,6 +258,15 @@
     else if (!list.length) body = html`<p class="note">${sel === today ? 'วันนี้' : 'วันนั้น'}ไม่มีนิสัยที่ต้องทำ พักผ่อนได้เลย</p>`;
     else body = html`<ul class="habits">${list.map((h) => habitRow(h, sel))}</ul>`;
 
+    // นิสัยที่มีอยู่แล้วในวันนั้นแต่ไม่ได้ตั้งให้ทำวันนั้น: แสดงเป็นชิปให้เห็นว่ายังอยู่ ไม่ได้หาย
+    const resting = habits.filter((h) => sel >= h.created && !L.showsOn(h, sel));
+    const restBlock = resting.length
+      ? html`<section class="resting" aria-label="นิสัยที่ไม่ต้องทำ${sel === today ? 'วันนี้' : 'วันนั้น'}">
+          <p class="resting-title">ไม่ต้องทำ${sel === today ? 'วันนี้' : 'วันนั้น'}</p>
+          <div class="chips">${resting.map((h) => html`<button class="chip sm" type="button" data-action="open-habit" data-id="${h.id}" data-fk="rest:${h.id}">${h.icon} ${h.name}</button>`)}</div>
+        </section>`
+      : '';
+
     const banner = allDone
       ? html`<p class="banner" role="status">${ico('check', 20)}<span>${sel === today ? 'ครบทุกนิสัยของวันนี้แล้ว เยี่ยมมาก' : 'วันนั้นทำครบทุกนิสัย'}</span></p>`
       : '';
@@ -277,7 +286,7 @@
         ${has ? strip : ''}
         ${has && sel !== today ? html`<div><button class="chip sm" type="button" data-action="go-today" data-fk="go-today">กลับมาที่วันนี้</button></div>` : ''}
       </header>
-      ${banner}${warn}${body}`);
+      ${banner}${warn}${body}${restBlock}`);
 
     const bar = $('.meter > span', el);
     if (bar && ui.prevPct !== pct) {
