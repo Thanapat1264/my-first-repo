@@ -1,0 +1,11 @@
+{
+  "name": "habit-tracker",
+  "version": "1.0.0",
+  "description": "แอปติดตามนิสัยประจำวัน ใช้งานบนมือถือได้ (PWA ไม่ต้อง build)",
+  "private": true,
+  "scripts": {
+    "start": "npx --yes serve .",
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
