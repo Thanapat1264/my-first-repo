@@ -543,9 +543,11 @@ html.no-modal dialog[open] { background: var(--scrim); }
 
 .about { text-align: center; font-size: 13px; color: var(--ink-3); line-height: 1.6; padding: 4px 8px; }
 
-.only-synced { display: none; }
+.only-synced, .when-synced { display: none; }
 html[data-sync] .only-local { display: none !important; }
 html[data-sync] .only-synced { display: grid; }
+html[data-sync] .when-synced { display: block; }
+html[data-no-export] [data-action="export"] { display: none; }
 .sync-text { display: none; }
 html:not([data-sync-status]) .sync-text[data-s="ok"],
 html[data-sync-status="ok"] .sync-text[data-s="ok"],

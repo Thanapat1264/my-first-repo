@@ -2,8 +2,8 @@
  * นิสัยประจำวัน: หน้าจอ การเก็บข้อมูล และการโต้ตอบ
  * ตรรกะล้วน (วันที่ สตรีค สถิติ) อยู่ใน logic.js
  *
- * window.HabitApp เปิดไว้ 3 ฟังก์ชันสำหรับต่อกับที่เก็บข้อมูลอื่นหรือใช้ทดสอบ:
- *   getState(), replaceState(raw), onChange(fn)
+ * window.HabitApp เปิดไว้ไม่กี่ฟังก์ชันสำหรับต่อกับที่เก็บข้อมูลอื่นหรือใช้ทดสอบ:
+ *   getState(), replaceState(raw), onChange(fn), toast(msg)
  */
 (function () {
   'use strict';
@@ -180,11 +180,17 @@
 
   // ---------- ธีม ----------
 
+  let themeOwned = false; // เราเป็นคนตั้ง data-theme เอง: ถ้าไม่ใช่ (เช่นถูกฝังในหน้าที่ผู้ดูคุมธีมอยู่) จะไม่ไปลบของคนอื่น
   function applyTheme() {
     const pref = state.settings.theme;
     const root = document.documentElement;
-    if (pref === 'light' || pref === 'dark') root.dataset.theme = pref;
-    else delete root.dataset.theme;
+    if (pref === 'light' || pref === 'dark') {
+      root.dataset.theme = pref;
+      themeOwned = true;
+    } else if (themeOwned) {
+      delete root.dataset.theme;
+      themeOwned = false;
+    }
     const dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.querySelectorAll('meta[name="theme-color"]').forEach((m) => { m.content = dark ? THEME_COLORS.dark : THEME_COLORS.light; });
   }
@@ -463,15 +469,16 @@
     mount($('#view-settings'), html`
       <h1 class="page-title" id="settings-title">ตั้งค่า</h1>
 
-      <section class="card" aria-labelledby="set-theme"><h2 class="card-title" id="set-theme">ธีม</h2>
+      <section class="card only-local" aria-labelledby="set-theme"><h2 class="card-title" id="set-theme">ธีม</h2>
         <div class="seg" role="group" aria-labelledby="set-theme">${L.THEMES.map((t) => html`<button type="button" data-action="set-theme" data-theme="${t}" data-fk="theme:${t}" aria-pressed="${state.settings.theme === t ? 'true' : 'false'}">${THEME_LABELS[t]}</button>`)}</div>
       </section>
 
       ${installCard()}
       ${order}
 
-      <section class="card only-local" aria-labelledby="set-backup"><h2 class="card-title" id="set-backup">สำรองข้อมูล</h2>
-        <p class="muted">ข้อมูลเก็บอยู่ในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด ส่งออกเป็นไฟล์ไว้เป็นระยะ เผื่อเปลี่ยนเครื่องหรือเผลอล้างข้อมูลเบราว์เซอร์</p>
+      <section class="card" aria-labelledby="set-backup"><h2 class="card-title" id="set-backup">สำรองข้อมูล</h2>
+        <p class="muted only-local">ข้อมูลเก็บอยู่ในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด ส่งออกเป็นไฟล์ไว้เป็นระยะ เผื่อเปลี่ยนเครื่องหรือเผลอล้างข้อมูลเบราว์เซอร์</p>
+        <p class="muted when-synced">ส่งออกข้อมูลเป็นไฟล์ไว้เก็บเอง หรือย้ายไปใช้กับแอปเวอร์ชันที่ติดตั้งบนมือถือ การนำเข้าจะแทนที่ข้อมูลปัจจุบันทั้งหมด</p>
         <div class="btn-row">
           <button class="btn" type="button" data-action="export">${ico('download', 20)}ส่งออก</button>
           <button class="btn" type="button" data-action="import">${ico('upload', 20)}นำเข้า</button>
@@ -1023,6 +1030,7 @@
       renderAll();
     },
     onChange(fn) { listeners.push(fn); },
+    toast,
   };
 
   init();
