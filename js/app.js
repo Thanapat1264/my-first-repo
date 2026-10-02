@@ -13,7 +13,7 @@
   // ---------- ค่าคงที่ ----------
 
   const STORAGE_KEY = 'habit-tracker:v1';
-  const VERSION = '1.0';
+  const VERSION = '1.1';
 
   const HUE_NAMES = {
     blue: 'น้ำเงิน', orange: 'ส้ม', aqua: 'เขียวมิ้นต์', yellow: 'เหลือง',
@@ -82,6 +82,11 @@
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
     flame: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>',
+    pause: '<path d="M8 4v16M16 4v16"/>',
+    play: '<path d="M6 4l14 8-14 8z"/>',
+    moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    calendar: '<path d="M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 2v4M8 2v4M3 10h18"/>',
   };
   function ico(name, size, filled) {
     const fill = filled ? 'currentColor' : 'none';
@@ -109,6 +114,8 @@
     prevPct: 0,
     storageOk: true,
     installPrompt: null,
+    celebrated: new Set(),   // เหรียญที่ฉลองไปแล้ววันนี้ ไม่ฉลองซ้ำเมื่อติ๊กออกแล้วติ๊กใหม่
+    pendingCelebrate: null,  // เหรียญที่รอฉลองอยู่ เพราะตอนนั้นมีชีตเปิดบังอยู่
   };
   ui.selected = ui.today;
   ui.statDay = ui.today;
@@ -159,6 +166,7 @@
     const h = findHabit(id);
     if (!h || key > ui.today) return;
     const before = L.countOn(h, key);
+    const streakBefore = L.currentStreak(h, ui.today);
     n = Math.max(0, Math.min(99, n));
     if (n > 0) {
       h.log[key] = n;
@@ -166,11 +174,25 @@
     } else {
       delete h.log[key];
     }
+    let medalDays = null;
     if (n > before) {
       ui.pop = id;
+      medalDays = L.crossedMilestone(streakBefore, L.currentStreak(h, ui.today));
       if (navigator.vibrate) { try { navigator.vibrate(10); } catch (e) { /* ไม่รองรับ */ } }
     }
     commit();
+    if (medalDays) celebrate(h, medalDays);
+  }
+
+  /** ตั้ง/ยกเลิกวันหยุดของนิสัยหนึ่งในวัน key (ไม่ commit ให้ผู้เรียกทำเอง) */
+  function setRest(h, key, on) {
+    if (key > ui.today) return;
+    if (on) {
+      h.log[key] = L.REST;
+      if (key < h.created) h.created = key;
+    } else if (L.isRest(h, key)) {
+      delete h.log[key];
+    }
   }
 
   function nextFreeHue() {
@@ -238,11 +260,14 @@
     const sums = week.map((k) => L.daySummary(habits, k));
     const isFull = (s) => s.total > 0 && s.done === s.total;
 
+    const dayRested = habits.filter((h) => L.isScheduled(h, sel) && L.isRest(h, sel));
+    const dayOpen = habits.filter((h) => L.isDue(h, sel) && L.countOn(h, sel) === 0); // ยังไม่ได้เริ่มเลย ตั้งวันหยุดได้
+    const noneCap = dayRested.length ? 'วันหยุด' : 'ไม่มีนิสัยที่ต้องทำ';
     const hero = sum.total
       ? html`<div class="hero"><span class="hero-num">${sum.done}<span class="hero-of">/${sum.total}</span></span><span class="hero-cap">ทำแล้ว</span></div>`
-      : html`<div class="hero"><span class="hero-num">–</span><span class="hero-cap">ไม่มีนิสัยที่ต้องทำ</span></div>`;
+      : html`<div class="hero"><span class="hero-num">–</span><span class="hero-cap">${noneCap}</span></div>`;
 
-    const valueText = sum.total ? `ทำแล้ว ${sum.done} จาก ${sum.total}` : 'ไม่มีนิสัยที่ต้องทำ';
+    const valueText = sum.total ? `ทำแล้ว ${sum.done} จาก ${sum.total}` : noneCap;
     const meter = html`<div class="meter" role="progressbar" aria-label="ความคืบหน้าของวัน" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-valuetext="${valueText}"><span style="width:${pct}%"></span></div>`;
 
     const strip = html`<div class="strip" role="group" aria-label="เลือกวัน (7 วันล่าสุด)">${week.map((key, i) => {
@@ -263,8 +288,17 @@
     const restBlock = resting.length
       ? html`<section class="resting" aria-label="นิสัยที่ไม่ต้องทำ${sel === today ? 'วันนี้' : 'วันนั้น'}">
           <p class="resting-title">ไม่ต้องทำ${sel === today ? 'วันนี้' : 'วันนั้น'}</p>
-          <div class="chips">${resting.map((h) => html`<button class="chip sm" type="button" data-action="open-habit" data-id="${h.id}" data-fk="rest:${h.id}">${h.icon} ${h.name}</button>`)}</div>
+          <div class="chips">${resting.map((h) => html`<button class="chip sm" type="button" data-action="open-habit" data-id="${h.id}" data-fk="rest:${h.id}">${h.icon} ${h.name}${L.isPaused(h, sel) ? html`<span class="tag">พักอยู่</span>` : ''}</button>`)}</div>
         </section>`
+      : '';
+
+    // วันนี้ไม่สะดวกทำ (ป่วย เดินทาง ฯลฯ): ตั้งทั้งวันเป็นวันหยุดในครั้งเดียว สตรีคไม่ขาด
+    const which = sel === today ? 'วันนี้' : 'วันนั้น';
+    const dayTools = has && (dayOpen.length || dayRested.length)
+      ? html`<div class="day-tools">
+          ${dayOpen.length ? html`<button class="link-btn" type="button" data-action="rest-day" data-fk="rest-day">${which}ไม่สะดวกทำ? ตั้งเป็นวันหยุด (สตรีคไม่ขาด)</button>` : ''}
+          ${dayRested.length ? html`<button class="link-btn" type="button" data-action="unrest-day" data-fk="unrest-day">ยกเลิกวันหยุดของ${which}</button>` : ''}
+        </div>`
       : '';
 
     const banner = allDone
@@ -286,7 +320,7 @@
         ${has ? strip : ''}
         ${has && sel !== today ? html`<div><button class="chip sm" type="button" data-action="go-today" data-fk="go-today">กลับมาที่วันนี้</button></div>` : ''}
       </header>
-      ${banner}${warn}${body}${restBlock}`);
+      ${banner}${warn}${body}${dayTools}${restBlock}`);
 
     const bar = $('.meter > span', el);
     if (bar && ui.prevPct !== pct) {
@@ -298,6 +332,19 @@
   }
 
   function habitRow(h, key) {
+    if (L.isRest(h, key)) {
+      const streakR = L.currentStreak(h, ui.today);
+      return html`<li class="habit hue-${h.color} is-rest">
+        <button class="habit-main" type="button" data-action="open-habit" data-id="${h.id}" data-fk="open:${h.id}">
+          <span class="chip-icon" aria-hidden="true">${h.icon}</span>
+          <span class="habit-text">
+            <span class="habit-name">${h.name}</span>
+            <span class="habit-meta"><span class="rest-tag">${ico('moon', 13)}วันหยุด</span>${streakR > 0 ? html`<span class="streak">${ico('flame', 14, true)}${streakR} วัน</span>` : ''}</span>
+          </span>
+        </button>
+        <div class="habit-ctl"><button class="btn btn-ghost sm" type="button" data-action="unrest" data-id="${h.id}" data-fk="unrest:${h.id}" aria-label="ยกเลิกวันหยุดของ ${h.name}">ยกเลิก</button></div>
+      </li>`;
+    }
     const count = L.countOn(h, key);
     const done = count >= h.target;
     const multi = h.target > 1;
@@ -359,6 +406,32 @@
     const s30 = L.overallStats(habits, L.addDays(today, -29), today);
     const bestNow = Math.max(0, ...habits.map((h) => L.currentStreak(h, today)));
 
+    // เทียบ 7 วันล่าสุดกับ 7 วันก่อนหน้า (แสดงผลอย่างเดียว ไม่บันทึกอะไร)
+    const cmp = L.weekCompare(habits, today);
+    const deltaView = (d) => (d === null
+      ? html`<span class="delta same">ยังเทียบไม่ได้</span>`
+      : d > 0 ? html`<span class="delta up">${ico('up', 16)}ดีขึ้น ${d} จุด</span>`
+        : d < 0 ? html`<span class="delta down">${ico('down', 16)}ลดลง ${-d} จุด</span>`
+          : html`<span class="delta same">${ico('minus', 16)}เท่าเดิม</span>`);
+    const pctText = (v) => (v === null ? '–' : html`${v}<small>%</small>`);
+    const cmpRows = cmp.rows.map((r) => {
+      const h = habits.find((x) => x.id === r.id);
+      return html`<li class="hue-${h.color}"><span class="chip-icon sm" aria-hidden="true">${h.icon}</span>
+        <span class="cmp-name">${h.name}<span class="cmp-sub">${r.now === null ? '–' : r.now + '%'} · สัปดาห์ก่อน ${r.prev === null ? '–' : r.prev + '%'}</span></span>
+        ${deltaView(r.delta)}</li>`;
+    });
+    const cmpCard = html`<section class="card" aria-labelledby="chart-cmp">
+        <div><h2 class="card-title" id="chart-cmp">เทียบกับสัปดาห์ก่อน</h2><p class="card-sub">7 วันล่าสุด เทียบกับ 7 วันก่อนหน้านั้น</p></div>
+        ${cmp.now === null && cmp.prev === null
+          ? html`<p class="muted">ยังไม่มีข้อมูลพอให้เทียบ</p>`
+          : html`<div class="cmp-hero">
+              <div><span class="cmp-num">${pctText(cmp.now)}</span><span class="cmp-cap">7 วันล่าสุด</span></div>
+              <div><span class="cmp-num dim">${pctText(cmp.prev)}</span><span class="cmp-cap">7 วันก่อนหน้า</span></div>
+              ${deltaView(cmp.delta)}
+            </div>
+            <ul class="cmp-list">${cmpRows}</ul>`}
+      </section>`;
+
     const kpi = (v, unit, label) => html`<div class="kpi"><div class="kpi-v">${v === null ? '–' : v}${v === null ? '' : html`<small>${unit}</small>`}</div><div class="kpi-l">${label}</div></div>`;
 
     // กราฟแท่ง 7 วัน
@@ -409,7 +482,7 @@
       const meterLabel = p30 === null ? 'ยังไม่มีข้อมูล' : `ทำสำเร็จ ${p30}% ใน 30 วันล่าสุด`;
       return html`<button class="stat-row hue-${h.color}" type="button" data-action="open-habit" data-id="${h.id}" data-fk="srow:${h.id}">
         <span class="chip-icon sm" aria-hidden="true">${h.icon}</span>
-        <span class="stat-name">${h.name}</span>
+        <span class="stat-name">${h.name}${L.isPaused(h, today) ? html`<span class="tag">พักอยู่</span>` : ''}</span>
         <span class="stat-pct">${p30 === null ? '–' : p30}${p30 === null ? '' : html`<small>%</small>`}</span>
         <span class="meter meter-h" role="img" aria-label="${meterLabel}"><span style="width:${p30 || 0}%"></span></span>
         <span class="stat-sub">${ico('flame', 14, true)}<span>ต่อเนื่อง ${cur} วัน · สูงสุด ${best} วัน</span></span>
@@ -419,6 +492,8 @@
     mount(el, html`
       <h1 class="page-title" id="stats-title">สถิติ</h1>
       <div class="kpis">${kpi(L.percent(s7), '%', '7 วันล่าสุด')}${kpi(L.percent(s30), '%', '30 วันล่าสุด')}${kpi(bestNow, 'วัน', 'ต่อเนื่องนานสุดตอนนี้')}</div>
+
+      ${cmpCard}
 
       <section class="card" aria-labelledby="chart-week">
         <div><h2 class="card-title" id="chart-week">ทำสำเร็จรายวัน</h2><p class="card-sub">สัดส่วนนิสัยที่ทำครบในแต่ละวัน 7 วันล่าสุด</p></div>
@@ -468,6 +543,7 @@
 
   function renderSettings() {
     const habits = state.habits;
+    const remindCount = habits.filter((h) => h.remind).length;
     const order = habits.length > 1
       ? html`<section class="card" aria-labelledby="set-order"><h2 class="card-title" id="set-order">ลำดับนิสัย</h2>
           <ul class="order">${habits.map((h, i) => html`<li class="hue-${h.color}"><span class="chip-icon sm" aria-hidden="true">${h.icon}</span><span class="name">${h.name}</span>
@@ -484,6 +560,12 @@
 
       ${installCard()}
       ${order}
+
+      <section class="card only-local" aria-labelledby="set-remind"><h2 class="card-title" id="set-remind">เตือนผ่านปฏิทิน</h2>
+        <p class="muted">เว็บแอปส่งแจ้งเตือนเองตอนปิดแอปไม่ได้ จึงใช้ปฏิทินของมือถือเตือนแทน ตั้งเวลาเตือนในหน้าแก้ไขแต่ละนิสัย แล้วกดปุ่มด้านล่างเพื่อเพิ่มทุกนิสัยที่ตั้งเวลาไว้ลงปฏิทินในครั้งเดียว</p>
+        <button class="btn" type="button" data-action="add-reminders-all"${remindCount ? '' : raw(' disabled')}>${ico('calendar', 20)}เพิ่มเตือนทั้งหมดลงปฏิทิน (${remindCount})</button>
+        <p class="muted">เปลี่ยนเวลาทีหลัง? ลบเตือนเก่าในปฏิทินก่อน แล้วเพิ่มใหม่</p>
+      </section>
 
       <section class="card" aria-labelledby="set-backup"><h2 class="card-title" id="set-backup">สำรองข้อมูล</h2>
         <p class="muted only-local">ข้อมูลเก็บอยู่ในเครื่องนี้เท่านั้น ไม่ถูกส่งไปที่ใด ส่งออกเป็นไฟล์ไว้เป็นระยะ เผื่อเปลี่ยนเครื่องหรือเผลอล้างข้อมูลเบราว์เซอร์</p>
@@ -513,7 +595,7 @@
     const h = findHabit(id);
     if (!h) return;
     const t = L.parseKey(ui.today);
-    ui.detail = { id, y: t.y, m: t.m };
+    ui.detail = { id, y: t.y, m: t.m, mode: 'done' };
     openDialog($('#dlg-detail'));
     renderDetail();
   }
@@ -526,7 +608,8 @@
     const future = key > ui.today;
     let cls = '';
     let status;
-    if (done) { cls = ' is-done'; status = 'ทำแล้ว'; }
+    if (L.isRest(h, key)) { cls = ' is-rest'; status = 'วันหยุด'; }
+    else if (done) { cls = ' is-done'; status = 'ทำแล้ว'; }
     else if (count > 0) { cls = ' is-part'; status = `ทำบางส่วน ${count} จาก ${h.target}`; }
     else if (sched && !future) { cls = ' is-miss'; status = 'ยังไม่ได้ทำ'; }
     else { cls = ' is-off'; status = sched ? 'ยังไม่ถึงวัน' : 'ไม่อยู่ในตาราง'; }
@@ -540,6 +623,7 @@
     const h = findHabit(ui.detail.id);
     if (!h) { dlg.close(); return; }
     const { y, m } = ui.detail;
+    const mode = ui.detail.mode || 'done';
     const { today } = ui;
     const t = L.parseKey(today);
     const lim = L.parseKey(L.addDays(today, -730));
@@ -548,7 +632,20 @@
     const cur = L.currentStreak(h, today);
     const best = L.bestStreak(h, today);
     const p30 = L.percent(L.rangeStats(h, L.addDays(today, -29), today));
+    const earned = L.earnedMilestones(h, today);
     const tile = (v, unit, label) => html`<div class="tile"><div class="tile-v">${v}${unit ? html`<small>${unit}</small>` : ''}</div><div class="tile-l">${label}</div></div>`;
+
+    const pausedNow = L.isPaused(h, today);
+    const open = (h.paused || []).find((p) => p.to === null);
+    const pauseRow = pausedNow
+      ? html`<div class="detail-row"><div><strong>พักนิสัยนี้อยู่</strong><span class="muted">${open ? `ตั้งแต่ ${L.formatDayMonth(open.from)} · ` : ''}ซ่อนจากรายการและไม่นับเป็นวันพลาด</span></div>
+          <button class="btn sm" type="button" data-action="resume" data-id="${h.id}">${ico('play', 16)}กลับมาทำต่อ</button></div>`
+      : html`<div class="detail-row"><div><strong>พักนิสัยนี้</strong><span class="muted">หยุดติดตามชั่วคราว ประวัติยังอยู่ กลับมาทำต่อได้ทุกเมื่อ</span></div>
+          <button class="btn sm" type="button" data-action="pause" data-id="${h.id}">${ico('pause', 16)}พัก</button></div>`;
+    const remindRow = h.remind
+      ? html`<div class="detail-row only-local"><div><strong>เตือนเวลา ${h.remind} น.</strong><span class="muted">ผ่านปฏิทินมือถือ</span></div>
+          <button class="btn sm" type="button" data-action="add-reminder" data-id="${h.id}">${ico('calendar', 16)}เพิ่มลงปฏิทิน</button></div>`
+      : '';
 
     mount($('.sheet', dlg), html`
       <div class="sheet-grab" aria-hidden="true"></div>
@@ -565,6 +662,9 @@
           ${tile(L.totalDone(h), 'วัน', 'ทำสำเร็จทั้งหมด')}
           ${tile(p30 === null ? '–' : p30, p30 === null ? '' : '%', 'อัตราใน 30 วัน')}
         </div>
+        <div class="medals" role="group" aria-label="เหรียญสตรีค">
+          ${L.MILESTONES.map((d) => html`<div class="medal-slot${earned.indexOf(d) !== -1 ? ' earned' : ''}">${medal(d, 44)}<span>${d} วัน${earned.indexOf(d) !== -1 ? ' · ได้แล้ว' : ''}</span></div>`)}
+        </div>
         <div class="cal-head">
           <button class="icon-btn" type="button" data-action="cal-prev" data-fk="cal-prev" aria-label="เดือนก่อนหน้า"${atMin ? raw(' disabled') : ''}>${ico('left', 20)}</button>
           <h3>${L.formatMonthYear(y, m)}</h3>
@@ -574,7 +674,18 @@
           ${L.TH_DAYS_SHORT.map((d) => html`<span class="cal-h">${d}</span>`)}
           ${L.monthGrid(y, m).flat().map((key) => calCell(h, key))}
         </div>
-        <p class="cal-hint">แตะวันที่เพื่อสลับ “ทำแล้ว / ยังไม่ทำ”${h.target > 1 ? ` (บันทึกครบ ${h.target} ${L.unitOf(h)})` : ''}</p>
+        <div class="cal-mode" role="group" aria-label="แตะวันที่เพื่อ">
+          <span class="muted">แตะวันที่เพื่อ</span>
+          <div class="seg seg-2">
+            <button type="button" data-action="cal-mode" data-mode="done" data-fk="mode:done" aria-pressed="${mode === 'done' ? 'true' : 'false'}">ทำแล้ว</button>
+            <button type="button" data-action="cal-mode" data-mode="rest" data-fk="mode:rest" aria-pressed="${mode === 'rest' ? 'true' : 'false'}">วันหยุด</button>
+          </div>
+        </div>
+        <p class="cal-hint">${mode === 'rest'
+          ? 'แตะวันที่เพื่อสลับ “วันหยุด” (เช่น ป่วย เดินทาง) วันหยุดไม่ทำให้สตรีคขาดและไม่นับเป็นวันพลาด'
+          : html`แตะวันที่เพื่อสลับ “ทำแล้ว / ยังไม่ทำ”${h.target > 1 ? ` (บันทึกครบ ${h.target} ${L.unitOf(h)})` : ''}`}</p>
+        ${remindRow}
+        ${pauseRow}
       </div>`);
   }
 
@@ -583,14 +694,18 @@
   function openForm(id, preset) {
     const h = id ? findHabit(id) : null;
     const base = h || preset || {};
+    const icon = base.icon || '🎯';
     ui.form = {
       id: h ? h.id : null,
       name: base.name || '',
-      icon: base.icon || '🎯',
+      icon,
+      // อีโมจิที่เลือกเองจากคีย์บอร์ด (รวมไอคอนเดิมของนิสัยที่แก้ไขอยู่) แสดงก่อนชุดสำเร็จรูป ให้เลือกกลับไปมาได้
+      extra: EMOJIS.indexOf(icon) === -1 ? [icon] : [],
       color: base.color || nextFreeHue(),
       days: new Set(h ? h.days : [0, 1, 2, 3, 4, 5, 6]),
       target: base.target || 1,
       unit: base.unit || '',
+      remind: base.remind || '',
     };
     renderForm();
     openDialog($('#dlg-form'));
@@ -600,10 +715,26 @@
     }
   }
 
+  /** ปุ่มไอคอนในฟอร์ม: ตัวที่เลือกเอง (และไอคอนเดิมของนิสัยที่แก้ไขอยู่) ขึ้นก่อนชุดสำเร็จรูป */
+  function emojiButtons(f) {
+    const custom = f.extra.slice();
+    if (EMOJIS.indexOf(f.icon) === -1 && custom.indexOf(f.icon) === -1) custom.unshift(f.icon);
+    return html`${custom.concat(EMOJIS).map((e) => html`<button class="emoji" type="button" data-action="pick-icon" data-icon="${e}" aria-pressed="${f.icon === e ? 'true' : 'false'}" aria-label="ไอคอน ${e}">${e}</button>`)}`;
+  }
+
+  function useCustomEmoji(emoji) {
+    const f = ui.form;
+    f.icon = emoji;
+    if (EMOJIS.indexOf(emoji) === -1 && f.extra.indexOf(emoji) === -1) {
+      f.extra.push(emoji);
+      if (f.extra.length > 12) f.extra.shift();
+    }
+    mount($('#emoji-grid'), emojiButtons(f));
+  }
+
   function renderForm() {
     const f = ui.form;
     const editing = !!f.id;
-    const icons = EMOJIS.indexOf(f.icon) === -1 ? [f.icon].concat(EMOJIS) : EMOJIS;
     const dayChip = (d) => html`<button type="button" data-action="toggle-dow" data-d="${d}" aria-pressed="${f.days.has(d) ? 'true' : 'false'}" aria-label="วัน${L.TH_DAYS[d]}">${L.TH_DAYS_SHORT[d]}</button>`;
 
     mount($('#dlg-form .sheet'), html`
@@ -619,7 +750,9 @@
         ${editing ? '' : html`<div class="field"><span class="label">หรือเลือกจากไอเดีย</span>
           <div class="chips">${IDEAS.map((idea, i) => html`<button class="chip sm" type="button" data-action="idea" data-i="${i}">${idea.icon} ${idea.name}</button>`)}</div></div>`}
         <div class="field"><span class="label" id="lbl-icon">ไอคอน</span>
-          <div class="emoji-grid" role="group" aria-labelledby="lbl-icon">${icons.map((e) => html`<button class="emoji" type="button" data-action="pick-icon" data-icon="${e}" aria-pressed="${f.icon === e ? 'true' : 'false'}" aria-label="ไอคอน ${e}">${e}</button>`)}</div></div>
+          <div class="emoji-grid" id="emoji-grid" role="group" aria-labelledby="lbl-icon">${emojiButtons(f)}</div>
+          <input class="input" id="f-emoji" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="เพิ่มอีโมจิอื่น" placeholder="แตะที่นี่ แล้วเลือกอีโมจิจากคีย์บอร์ด">
+          <p class="muted">ได้ทุกตัวที่คีย์บอร์ดมี iPhone: กดปุ่มรูปโลกเพื่อสลับเป็นอีโมจิ</p></div>
         <div class="field"><span class="label" id="lbl-color">สี</span>
           <div class="swatches" role="group" aria-labelledby="lbl-color">${L.HUES.map((c) => html`<button class="swatch hue-${c}" type="button" data-action="pick-color" data-color="${c}" aria-pressed="${f.color === c ? 'true' : 'false'}" aria-label="สี${HUE_NAMES[c]}">${ico('check', 18)}</button>`)}</div></div>
         <div class="field"><span class="label" id="lbl-days">ทำวันไหนบ้าง</span>
@@ -639,6 +772,12 @@
             <label class="label" for="f-unit">หน่วย</label>
             <input class="input" id="f-unit" name="unit" maxlength="12" autocomplete="off" placeholder="เช่น แก้ว หน้า นาที" value="${f.unit}">
           </div></div>
+        <div class="field only-local"><label class="label" for="f-remind">เตือนผ่านปฏิทินมือถือ (ไม่บังคับ)</label>
+          <div class="remind-input">
+            <input class="input" id="f-remind" name="remind" type="time" value="${f.remind}">
+            <button class="btn sm" type="button" data-action="clear-remind">ล้าง</button>
+          </div>
+          <p class="muted">ตั้งเวลาแล้วบันทึก จากนั้นเปิดหน้ารายละเอียดของนิสัยแล้วกด “เพิ่มลงปฏิทิน”</p></div>
         <div class="sheet-actions">
           ${editing ? html`<button class="btn btn-danger btn-icon-danger" type="button" data-action="delete-habit" aria-label="ลบนิสัยนี้">${ico('trash', 20)}</button>` : ''}
           <button class="btn btn-primary" type="submit">บันทึก</button>
@@ -658,7 +797,7 @@
       $('#f-name').focus();
       return;
     }
-    const fields = { name, icon: f.icon, color: f.color, days: Array.from(f.days), target: f.target, unit: f.unit };
+    const fields = { name, icon: f.icon, color: f.color, days: Array.from(f.days), target: f.target, unit: f.unit, remind: f.remind };
     if (f.id) {
       const i = state.habits.findIndex((h) => h.id === f.id);
       if (i === -1) {
@@ -677,6 +816,60 @@
     closeDialog($('#dlg-form'));
     commit();
     toast(wasEditing ? 'บันทึกการแก้ไขแล้ว' : `เพิ่ม “${name}” แล้ว`);
+  }
+
+  // ---------- เหรียญและการฉลอง ----------
+
+  /** เหรียญสตรีคแบบ SVG (สีเหรียญกำหนดใน CSS ตามจำนวนวัน) */
+  function medal(days, size) {
+    const w = size || 56;
+    const big = days >= 100;
+    return raw(`<svg class="medal m${days}" viewBox="0 0 64 72" width="${w}" height="${Math.round((w * 72) / 64)}" aria-hidden="true" focusable="false"><path class="ribbon" d="M18 2h12l6 22H24z"/><path class="ribbon" d="M46 2H34l-6 22h12z"/><circle class="disc" cx="32" cy="46" r="22"/><circle class="ring" cx="32" cy="46" r="17"/><text x="32" y="${big ? 51 : 52.5}" text-anchor="middle" font-size="${big ? 14 : 19}" font-weight="700">${days}</text></svg>`);
+  }
+
+  const CONFETTI = ['var(--blue)', 'var(--orange)', 'var(--aqua)', 'var(--yellow)', 'var(--magenta)', 'var(--green)', 'var(--violet)', 'var(--red)'];
+  function confettiPieces() {
+    const out = [];
+    for (let i = 0; i < 28; i++) {
+      const left = Math.round(Math.random() * 100);
+      const delay = (Math.random() * 0.5).toFixed(2);
+      const dur = (1.6 + Math.random() * 1.2).toFixed(2);
+      const rot = Math.round(Math.random() * 360);
+      const sway = Math.round(Math.random() * 80 - 40);
+      out.push(html`<i style="--l:${left}%;--d:${delay}s;--t:${dur}s;--r:${rot}deg;--s:${sway}px;--c:${CONFETTI[i % CONFETTI.length]}"></i>`);
+    }
+    return out;
+  }
+
+  /** ประกาศให้โปรแกรมอ่านหน้าจอ (ข้อความในพื้นที่ซ่อนที่เป็น live region) */
+  function announce(msg) {
+    const el = $('#live');
+    el.textContent = '';
+    setTimeout(() => { el.textContent = msg; }, 50);
+  }
+
+  let celebrateTimer = null;
+  function hideCelebrate() {
+    clearTimeout(celebrateTimer);
+    const el = $('#celebrate');
+    el.hidden = true;
+    el.replaceChildren();
+  }
+  function celebrate(h, days) {
+    if (document.querySelector('dialog[open]')) { ui.pendingCelebrate = { id: h.id, days }; return; } // ชีตเปิดบังอยู่ รอปิดก่อน
+    const key = `${h.id}:${days}:${ui.today}`;
+    if (ui.celebrated.has(key)) return;
+    ui.celebrated.add(key);
+    const el = $('#celebrate');
+    mount(el, html`<div class="confetti" aria-hidden="true">${confettiPieces()}</div>
+      <div class="celebrate-card hue-${h.color}">${medal(days, 96)}
+        <h2>ต่อเนื่อง ${days} วันแล้ว!</h2>
+        <p><span aria-hidden="true">${h.icon}</span> ${h.name}</p>
+        <p class="muted">แตะเพื่อปิด</p></div>`);
+    el.hidden = false;
+    announce(`ได้เหรียญต่อเนื่อง ${days} วัน ${h.name}`);
+    clearTimeout(celebrateTimer);
+    celebrateTimer = setTimeout(hideCelebrate, 4200);
   }
 
   // ---------- กล่องโต้ตอบ ----------
@@ -737,22 +930,18 @@
 
   // ---------- สำรอง / นำเข้า / ล้างข้อมูล ----------
 
-  async function exportData() {
-    const text = JSON.stringify({
-      app: 'habit-tracker', version: 1, exportedAt: new Date().toISOString(),
-      habits: state.habits, settings: state.settings,
-    }, null, 2);
-    const name = `habit-tracker-${ui.today}.json`;
+  /** ส่งไฟล์ออกจากแอป: ใช้แผ่นแชร์ของมือถือถ้าได้ ไม่งั้นดาวน์โหลดตรง คืน false ถ้าผู้ใช้ยกเลิก */
+  async function deliverFile(name, text, mime, shareTitle, doneMsg) {
     try {
-      const file = new File([text], name, { type: 'application/json' });
+      const file = new File([text], name, { type: mime });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: 'ข้อมูลนิสัยประจำวัน' });
-        return;
+        await navigator.share({ files: [file], title: shareTitle });
+        return true;
       }
     } catch (e) {
-      if (e && e.name === 'AbortError') return;
+      if (e && e.name === 'AbortError') return false;
     }
-    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const url = URL.createObjectURL(new Blob([text], { type: mime }));
     const a = document.createElement('a');
     a.href = url;
     a.download = name;
@@ -760,7 +949,27 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    toast('บันทึกไฟล์สำรองแล้ว');
+    toast(doneMsg);
+    return true;
+  }
+
+  function exportData() {
+    const text = JSON.stringify({
+      app: 'habit-tracker', version: 1, exportedAt: new Date().toISOString(),
+      habits: state.habits, settings: state.settings,
+    }, null, 2);
+    return deliverFile(`habit-tracker-${ui.today}.json`, text, 'application/json', 'ข้อมูลนิสัยประจำวัน', 'บันทึกไฟล์สำรองแล้ว');
+  }
+
+  /** สร้างไฟล์เตือนซ้ำสำหรับปฏิทินมือถือ ของนิสัยที่ตั้งเวลา remind ไว้ */
+  function addReminders(list) {
+    const withTime = list.filter((h) => h.remind);
+    if (!withTime.length) { toast('ยังไม่ได้ตั้งเวลาเตือน'); return Promise.resolve(false); }
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+    const url = location.href.split('#')[0].split('?')[0];
+    const text = L.buildIcs(withTime, ui.today, stamp, /^https?:/.test(url) ? url : '');
+    return deliverFile(withTime.length === 1 ? 'habit-reminder.ics' : 'habit-reminders.ics', text, 'text/calendar',
+      'เตือนนิสัยประจำวัน', 'ได้ไฟล์เตือนแล้ว เปิดไฟล์นั้นเพื่อเพิ่มลงปฏิทิน');
   }
 
   async function importFile(file) {
@@ -852,8 +1061,53 @@
     },
     'cal-toggle'(t) {
       const h = findHabit(t.dataset.id);
-      if (h) setCount(h.id, t.dataset.date, L.isDone(h, t.dataset.date) ? 0 : h.target);
+      if (!h) return;
+      if (ui.detail && ui.detail.mode === 'rest') {
+        setRest(h, t.dataset.date, !L.isRest(h, t.dataset.date));
+        commit();
+      } else {
+        setCount(h.id, t.dataset.date, L.isDone(h, t.dataset.date) ? 0 : h.target);
+      }
     },
+    'cal-mode'(t) { ui.detail.mode = t.dataset.mode; renderDetail(); },
+
+    unrest(t) {
+      const h = findHabit(t.dataset.id);
+      if (h) { setRest(h, ui.selected, false); commit(); }
+    },
+    'rest-day'() {
+      const sel = ui.selected;
+      let n = 0;
+      for (const h of state.habits) if (L.isDue(h, sel) && L.countOn(h, sel) === 0) { setRest(h, sel, true); n++; }
+      if (n) { commit(); toast(`ตั้ง${sel === ui.today ? 'วันนี้' : 'วันนั้น'}เป็นวันหยุดแล้ว สตรีคไม่ขาด`); }
+    },
+    'unrest-day'() {
+      const sel = ui.selected;
+      for (const h of state.habits) if (L.isScheduled(h, sel)) setRest(h, sel, false);
+      commit();
+    },
+    pause(t) {
+      const h = findHabit(t.dataset.id);
+      if (!h) return;
+      L.pauseHabit(h, ui.today);
+      commit();
+      toast(`พัก “${h.name}” แล้ว กลับมาทำต่อได้ที่นี่`);
+    },
+    resume(t) {
+      const h = findHabit(t.dataset.id);
+      if (!h) return;
+      L.resumeHabit(h, ui.today);
+      commit();
+      toast(`กลับมาทำ “${h.name}” ต่อแล้ว`);
+    },
+    'add-reminder'(t) { const h = findHabit(t.dataset.id); if (h) addReminders([h]); },
+    'add-reminders-all'() { addReminders(state.habits); },
+    'clear-remind'() {
+      ui.form.remind = '';
+      const input = $('#f-remind');
+      if (input) input.value = '';
+    },
+    'close-celebrate': hideCelebrate,
 
     'pick-icon'(t) {
       ui.form.icon = t.dataset.icon;
@@ -952,6 +1206,14 @@
       if (e.target.value.trim()) $('#f-name-err').hidden = true;
     } else if (e.target.id === 'f-unit') {
       ui.form.unit = e.target.value;
+    } else if (e.target.id === 'f-remind') {
+      ui.form.remind = e.target.value;
+    } else if (e.target.id === 'f-emoji') {
+      if (e.isComposing || !e.target.value) return;
+      const emoji = L.firstEmoji(e.target.value);
+      e.target.value = '';
+      if (emoji) useCustomEmoji(emoji);
+      else toast('ช่องนี้ใส่ได้เฉพาะอีโมจิ ลองสลับเป็นคีย์บอร์ดอีโมจิ');
     }
   }
 
@@ -999,7 +1261,16 @@
         if (dlg.id === 'dlg-detail') ui.detail = null;
         if (dlg.id === 'dlg-form') ui.form = null;
         if (dlg.id === 'dlg-confirm' && confirmResolve) { const r = confirmResolve; confirmResolve = null; r(false); }
+        if (ui.pendingCelebrate && !document.querySelector('dialog[open]')) {
+          const { id, days } = ui.pendingCelebrate;
+          ui.pendingCelebrate = null;
+          const h = findHabit(id);
+          if (h) celebrate(h, days);
+        }
       });
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('#celebrate').hidden) hideCelebrate();
     });
 
     const scheme = window.matchMedia('(prefers-color-scheme: dark)');
